@@ -9,10 +9,11 @@ export interface LakeData {
   dateTime: string;
 }
 
-const SITE_ID = '02334400'; // Lake Sidney Lanier near Buford, GA
+const SITE_IDS = ['02334430', '02334400']; // Lake Sidney Lanier stations (Lake first, then River)
+const PRIMARY_SITE_ID = '02334430'; // Lake Sidney Lanier near Buford, GA
 
 export async function fetchLakeData(): Promise<LakeData> {
-  const url = `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${SITE_ID}&parameterCd=00062,00010,00020&siteStatus=all`;
+  const url = `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${SITE_IDS.join(',')}&parameterCd=00062,00010,00020&siteStatus=all`;
   
   try {
     const response = await fetch(url);
@@ -28,18 +29,24 @@ export async function fetchLakeData(): Promise<LakeData> {
     let waterTemp: number | null = null;
     let dateTime = '';
 
+    // Sort timeSeries so we prefer certain sites if data is duplicated
+    // But here we just want to fill in the blanks
     timeSeries.forEach((ts: any) => {
       const paramCode = ts.variable.variableCode[0].value;
-      const value = parseFloat(ts.values[0].value[0].value);
-      const dt = ts.values[0].value[0].dateTime;
+      if (!ts.values[0] || !ts.values[0].value || ts.values[0].value.length === 0) return;
       
-      if (paramCode === '00062') {
+      // Get the most recent value (last in the array)
+      const latestReading = ts.values[0].value[ts.values[0].value.length - 1];
+      const value = parseFloat(latestReading.value);
+      const dt = latestReading.dateTime;
+      
+      if (paramCode === '00062' && waterLevel === 0) {
         waterLevel = value;
         dateTime = dt;
-      } else if (paramCode === '00020') {
+      } else if (paramCode === '00020' && airTemp === null) {
         // Convert Celsius to Fahrenheit
         airTemp = (value * 9/5) + 32;
-      } else if (paramCode === '00010') {
+      } else if (paramCode === '00010' && waterTemp === null) {
         waterTemp = (value * 9/5) + 32;
       }
     });
@@ -48,7 +55,7 @@ export async function fetchLakeData(): Promise<LakeData> {
       waterLevel,
       airTemp,
       waterTemp,
-      dateTime
+      dateTime: dateTime || new Date().toISOString()
     };
   } catch (error) {
     console.error('Failed to fetch lake data:', error);
@@ -61,15 +68,15 @@ export interface RecentReading {
   high: number;
   low: number;
   rain: number;
+  lastLevel: number;
 }
 
 export async function fetchRecentReadings(days: number = 7): Promise<RecentReading[]> {
-  const endDate = new Date().toISOString().split('T')[0];
-  const startDate = new Date(Date.now() - (days + 1) * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  // Use 'iv' (instantaneous) instead of 'dv' (daily) because it's more up-to-date
+  const endDate = new Date().toISOString();
+  const startDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
   
-  // Fetch daily values (dv) for water level (00062) and precipitation (00045)
-  // We fetch multiple statistics to be safe: 00001 (Max), 00002 (Min), 00003 (Mean), 00006 (Sum for rain)
-  const url = `https://waterservices.usgs.gov/nwis/dv/?format=json&sites=${SITE_ID}&startDT=${startDate}&endDT=${endDate}&parameterCd=00062,00045&siteStatus=all`;
+  const url = `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${SITE_IDS.join(',')}&startDT=${startDate}&endDT=${endDate}&parameterCd=00062,00045,00065&siteStatus=all`;
   
   try {
     const response = await fetch(url);
@@ -78,46 +85,50 @@ export async function fetchRecentReadings(days: number = 7): Promise<RecentReadi
     const json = await response.json();
     const timeSeries = json.value.timeSeries;
     
-    const readingsMap: { [key: string]: RecentReading } = {};
+    if (!timeSeries || timeSeries.length === 0) return [];
+
+    const readingsMap: { [key: string]: { levels: number[], rain: number, lastLevel: number } } = {};
     
     timeSeries.forEach((ts: any) => {
       const paramCode = ts.variable.variableCode[0].value;
-      // Extract statistic code from the variable options or name
-      const statCode = ts.variable.options.option.find((opt: any) => opt.name === 'Statistic')?.value || 
-                       ts.variable.variableName.toLowerCase().includes('maximum') ? '00001' :
-                       ts.variable.variableName.toLowerCase().includes('minimum') ? '00002' :
-                       ts.variable.variableName.toLowerCase().includes('mean') ? '00003' : '';
-      
       const values = ts.values[0].value;
-      
+      if (!values || values.length === 0) return;
+
       values.forEach((v: any) => {
-        const date = new Date(v.dateTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        if (!readingsMap[date]) {
-          readingsMap[date] = { date, high: 0, low: 0, rain: 0 };
+        const dateObj = new Date(v.dateTime);
+        const dateKey = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        
+        if (!readingsMap[dateKey]) {
+          readingsMap[dateKey] = { levels: [], rain: 0, lastLevel: 0 };
         }
         
         const val = parseFloat(v.value);
-        if (isNaN(val)) return;
+        if (isNaN(val) || val === -999999) return;
 
-        if (paramCode === '00062') {
-          if (statCode === '00001') {
-            readingsMap[date].high = val;
-          } else if (statCode === '00002') {
-            readingsMap[date].low = val;
-          } else if (statCode === '00003' || statCode === '') {
-            // If we only have mean or a generic value, use it for both if they are still 0
-            if (readingsMap[date].high === 0) readingsMap[date].high = val;
-            if (readingsMap[date].low === 0) readingsMap[date].low = val;
-          }
+        if (paramCode === '00062' || paramCode === '00065') {
+          readingsMap[dateKey].levels.push(val);
+          // Keep track of the last level reading of the day
+          readingsMap[dateKey].lastLevel = val;
         } else if (paramCode === '00045') {
-          readingsMap[date].rain = val;
+          // For IV, precipitation is often cumulative or 15-min increments
+          // We'll take the max for the day as a rough estimate of daily total if it's cumulative
+          if (val > readingsMap[dateKey].rain) {
+            readingsMap[dateKey].rain = val;
+          }
         }
       });
     });
     
-    // Convert map to sorted array (descending date)
-    return Object.values(readingsMap)
+    return Object.entries(readingsMap)
+      .map(([date, data]) => ({
+        date,
+        high: data.levels.length > 0 ? Math.max(...data.levels) : 0,
+        low: data.levels.length > 0 ? Math.min(...data.levels) : 0,
+        rain: data.rain,
+        lastLevel: data.lastLevel
+      }))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .filter(r => r.high > 0)
       .slice(0, days);
     
   } catch (error) {
@@ -125,48 +136,86 @@ export async function fetchRecentReadings(days: number = 7): Promise<RecentReadi
     return [];
   }
 }
+
 export async function fetchHistoricalData(days: number = 7): Promise<any[]> {
   const endDate = new Date().toISOString().split('T')[0];
   const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
-  // Use 'dv' (daily values) for longer periods to be more efficient
-  // Use 'iv' (instantaneous values) for short periods (<= 30 days) for higher resolution
-  const service = days <= 30 ? 'iv' : 'dv';
-  const url = `https://waterservices.usgs.gov/nwis/${service}/?format=json&sites=${SITE_ID}&startDT=${startDate}&endDT=${endDate}&parameterCd=00062&siteStatus=all`;
+  // USGS 'iv' (instantaneous) is limited to ~120 days. Use 'dv' (daily) for longer periods.
+  const service = days <= 90 ? 'iv' : 'dv';
+  
+  // Query both sites to ensure we get data
+  const url = `https://waterservices.usgs.gov/nwis/${service}/?format=json&sites=${SITE_IDS.join(',')}&startDT=${startDate}&endDT=${endDate}&parameterCd=00062,00065&siteStatus=all`;
   
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch historical data');
     
     const json = await response.json();
-    if (!json.value.timeSeries[0]) return [];
+    const timeSeries = json.value.timeSeries;
     
-    const values = json.value.timeSeries[0].values[0].value;
+    if (!timeSeries || timeSeries.length === 0) return [];
+
+    // Strategy: 
+    // 1. Look for 00062 (Lake Level) at site 02334400 (Primary Lake)
+    // 2. Look for 00062 at any site
+    // 3. Look for 00065 (Gage Height) at any site
+    let levelSeries = timeSeries.find((ts: any) => 
+      ts.sourceInfo.siteCode[0].value === '02334400' && 
+      ts.variable.variableCode[0].value === '00062'
+    );
+
+    if (!levelSeries) {
+      levelSeries = timeSeries.find((ts: any) => ts.variable.variableCode[0].value === '00062');
+    }
+
+    if (!levelSeries) {
+      levelSeries = timeSeries.find((ts: any) => ts.variable.variableCode[0].value === '00065');
+    }
+
+    if (!levelSeries || !levelSeries.values[0] || !levelSeries.values[0].value || levelSeries.values[0].value.length === 0) {
+      return [];
+    }
     
-    // Sampling logic
+    const values = levelSeries.values[0].value;
+    
+    // Sampling logic to keep chart performant
     let sampled;
-    if (days <= 7) {
-      // For 7 days, show 4-hour intervals if using 'iv'
-      sampled = values.filter((_: any, i: number) => i % 4 === 0);
-    } else if (days <= 31) {
-      // For 1 month, show daily if using 'iv'
-      sampled = values.filter((_: any, i: number) => i % 24 === 0);
+    if (service === 'iv') {
+      // Instantaneous values are every 15 mins
+      // 1 day: every hour (step 4)
+      // 7 days: every 4 hours (step 16)
+      // 30-90 days: every 12 hours (step 48)
+      const step = days <= 1 ? 4 : days <= 7 ? 16 : 48;
+      sampled = values.filter((_: any, i: number) => i % step === 0);
     } else {
-      // For 6M or 1Y, we are using 'dv' which is already daily
-      // If 1Y, maybe sample every 3 days to keep chart clean
-      const step = days > 200 ? 5 : 1;
+      // Daily values (dv)
+      // 6 months: every 2 days (step 2)
+      // 1 year: every 5 days (step 5)
+      const step = days <= 180 ? 2 : 5;
       sampled = values.filter((_: any, i: number) => i % step === 0);
     }
 
-    return sampled.map((v: any) => ({
-      name: new Date(v.dateTime).toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: days > 31 ? undefined : 'numeric',
-        year: days > 365 ? '2-digit' : undefined
-      }),
-      level: parseFloat(v.value),
-      fullDate: new Date(v.dateTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    }));
+    return sampled.map((v: any) => {
+      const date = new Date(v.dateTime);
+      return {
+        name: days <= 1 
+          ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          : date.toLocaleDateString('en-US', { 
+              month: 'short', 
+              day: days > 60 ? undefined : 'numeric',
+              year: days > 365 ? '2-digit' : undefined
+            }),
+        level: parseFloat(v.value),
+        fullDate: date.toLocaleString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric',
+          hour: days <= 7 ? 'numeric' : undefined,
+          minute: days <= 7 ? '2-digit' : undefined
+        })
+      };
+    });
     
   } catch (error) {
     console.error('Failed to fetch historical data:', error);

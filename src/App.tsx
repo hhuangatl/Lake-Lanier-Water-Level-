@@ -24,7 +24,11 @@ import {
   Plus,
   Minus,
   Locate,
-  Loader2
+  Loader2,
+  User,
+  Shield,
+  Lock,
+  Mail
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -48,6 +52,7 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Types ---
 type Tab = 'dashboard' | 'history' | 'map' | 'settings';
+type UnitSystem = 'imperial' | 'metric';
 
 interface Reading {
   date: string;
@@ -58,12 +63,22 @@ interface Reading {
 
 // --- Components ---
 
-const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[] }) => {
+const Dashboard = ({ data, chartData, unitSystem }: { data: LakeData | null, chartData: any[], unitSystem: UnitSystem }) => {
   const fullPool = 1071.00;
-  const diff = data ? (data.waterLevel - fullPool).toFixed(2) : '0.00';
+  
+  const convertLevel = (val: number) => unitSystem === 'metric' ? val * 0.3048 : val;
+  const convertTemp = (val: number) => unitSystem === 'metric' ? (val - 32) * 5/9 : val;
+  const unitLabel = unitSystem === 'metric' ? 'm' : 'ft';
+  const tempUnit = unitSystem === 'metric' ? 'C' : 'F';
+
+  const waterLevel = data ? convertLevel(data.waterLevel) : 0;
+  const convertedFullPool = convertLevel(fullPool);
+  const diff = data ? (waterLevel - convertedFullPool).toFixed(2) : '0.00';
   const isAbove = data ? data.waterLevel > fullPool : false;
 
   if (!data) return null;
+
+  const convertedChartData = chartData.map(d => ({ ...d, level: convertLevel(d.level) }));
 
   return (
     <div className="space-y-6 pb-24">
@@ -82,16 +97,16 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
               "text-6xl font-extrabold tracking-tight transition-colors duration-500",
               isAbove ? "text-emerald-300" : "text-rose-300"
             )}>
-              {data.waterLevel.toFixed(2)}
+              {waterLevel.toFixed(2)}
             </h2>
-            <span className="text-xl font-medium text-sky-100">ft</span>
+            <span className="text-xl font-medium text-sky-100">{unitLabel}</span>
           </div>
           <div className={cn(
             "mt-6 inline-flex items-center rounded-full px-3 py-1 text-sm font-medium backdrop-blur-sm transition-colors duration-500",
             isAbove ? "bg-emerald-500/30 text-emerald-50" : "bg-rose-500/30 text-rose-50"
           )}>
             <TrendingUp size={16} className={cn("mr-1.5", !isAbove && "rotate-180")} />
-            {Math.abs(parseFloat(diff))} ft {isAbove ? 'Above' : 'Below'} Full Pool
+            {Math.abs(parseFloat(diff))} {unitLabel} {isAbove ? 'Above' : 'Below'} Full Pool
           </div>
         </div>
       </div>
@@ -106,8 +121,8 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Water Temp</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            {data.waterTemp ? `${data.waterTemp.toFixed(1)}°` : '--'}
-            <span className="ml-1 text-sm font-normal text-slate-400">F</span>
+            {data.waterTemp !== null ? `${convertTemp(data.waterTemp).toFixed(1)}°` : '--'}
+            <span className="ml-1 text-sm font-normal text-slate-400">{tempUnit}</span>
           </p>
         </div>
         <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
@@ -118,8 +133,8 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Air Temp</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">
-            {data.airTemp ? `${data.airTemp.toFixed(1)}°` : '--'}
-            <span className="ml-1 text-sm font-normal text-slate-400">F</span>
+            {data.airTemp !== null ? `${convertTemp(data.airTemp).toFixed(1)}°` : '--'}
+            <span className="ml-1 text-sm font-normal text-slate-400">{tempUnit}</span>
           </p>
         </div>
       </div>
@@ -127,20 +142,20 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
       {/* Trend Card */}
       <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
         <div className="mb-6 flex items-center justify-between">
-          <h3 className="font-bold text-slate-800">Recent Trend</h3>
-          {chartData.length > 1 && (
+          <h3 className="font-bold text-slate-800">Last 24 Hours</h3>
+          {convertedChartData.length > 1 && (
             <span className={cn(
               "rounded px-2 py-1 text-[10px] font-semibold",
-              chartData[chartData.length-1].level >= chartData[0].level ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+              convertedChartData[convertedChartData.length-1].level >= convertedChartData[0].level ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
             )}>
-              {(chartData[chartData.length-1].level - chartData[0].level).toFixed(2)} ft total
+              {(convertedChartData[convertedChartData.length-1].level - convertedChartData[0].level).toFixed(2)} {unitLabel} total
             </span>
           )}
         </div>
         
         <div className="h-32 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
+            <AreaChart data={convertedChartData}>
               <defs>
                 <linearGradient id="colorLevel" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
@@ -150,7 +165,7 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
               <Tooltip 
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '10px' }}
                 labelStyle={{ fontWeight: 'bold' }}
-                formatter={(value: number) => [`${value.toFixed(2)} ft`, 'Level']}
+                formatter={(value: number) => [`${value.toFixed(2)} ${unitLabel}`, 'Level']}
               />
               <Area 
                 type="monotone" 
@@ -172,7 +187,7 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
           </div>
           <div className="border-t border-slate-50 pt-3 flex justify-between text-sm">
             <span className="text-slate-500">Full Pool Level</span>
-            <span className="font-semibold text-slate-800">1071.00 ft</span>
+            <span className="font-semibold text-slate-800">{convertedFullPool.toFixed(2)} {unitLabel}</span>
           </div>
         </div>
       </div>
@@ -188,7 +203,7 @@ const Dashboard = ({ data, chartData }: { data: LakeData | null, chartData: any[
   );
 };
 
-const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg: string) => void }) => {
+const HistoryView = ({ data, onAction, unitSystem }: { data: LakeData | null, onAction: (msg: string) => void, unitSystem: UnitSystem }) => {
   const [period, setPeriod] = useState<'1M' | '6M' | '1Y'>('1M');
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [recentReadings, setRecentReadings] = useState<RecentReading[]>([]);
@@ -197,22 +212,33 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
   const [readingsCount, setReadingsCount] = useState(7);
   const [hasMore, setHasMore] = useState(true);
 
+  const convertLevel = (val: number) => unitSystem === 'metric' ? val * 0.3048 : val;
+  const convertRain = (val: number) => unitSystem === 'metric' ? val * 25.4 : val;
+  const unitLabel = unitSystem === 'metric' ? 'm' : 'ft';
+  const rainUnit = unitSystem === 'metric' ? 'mm' : 'in';
+
   useEffect(() => {
     async function loadHistory() {
       setLoading(true);
       const days = period === '1M' ? 30 : period === '6M' ? 180 : 365;
       const history = await fetchHistoricalData(days);
-      setHistoryData(history);
+      setHistoryData(history.map(d => ({ ...d, level: convertLevel(d.level) })));
       setLoading(false);
     }
     loadHistory();
-  }, [period]);
+  }, [period, unitSystem]);
 
   useEffect(() => {
     async function loadRecentReadings() {
       setTableLoading(true);
       const readings = await fetchRecentReadings(readingsCount);
-      setRecentReadings(readings);
+      setRecentReadings(readings.map(r => ({
+        ...r,
+        high: convertLevel(r.high),
+        low: convertLevel(r.low),
+        lastLevel: convertLevel(r.lastLevel),
+        rain: convertRain(r.rain)
+      })));
       // If we got fewer readings than requested, there's no more to load
       if (readings.length < readingsCount) {
         setHasMore(false);
@@ -222,7 +248,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
       setTableLoading(false);
     }
     loadRecentReadings();
-  }, [readingsCount]);
+  }, [readingsCount, unitSystem]);
 
   const handleLoadMore = () => {
     setReadingsCount(prev => prev + 7);
@@ -232,7 +258,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
     <div className="space-y-6 pb-24">
       <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">Water Levels (ft)</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Water Levels ({unitLabel})</h2>
           <div className="flex space-x-1 rounded-lg bg-gray-100 p-1">
             {(['1M', '6M', '1Y'] as const).map((p) => (
               <button
@@ -265,7 +291,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
                 tick={{ fontSize: 10, fill: '#94a3b8' }} 
               />
               <YAxis 
-                domain={['dataMin - 0.5', 'dataMax + 0.5']} 
+                domain={['dataMin - 0.1', 'dataMax + 0.1']} 
                 axisLine={false} 
                 tickLine={false} 
                 tick={{ fontSize: 10, fill: '#94a3b8' }} 
@@ -278,6 +304,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
                   }
                   return label;
                 }}
+                formatter={(value: number) => [`${value.toFixed(2)} ${unitLabel}`, 'Level']}
               />
               <Line 
                 type="monotone" 
@@ -292,8 +319,8 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
         </div>
 
         <div className="mt-4 flex justify-between text-sm text-gray-500">
-          <p>Current Level: <span className="font-bold text-sky-600">{data?.waterLevel.toFixed(2) || '--'} ft</span></p>
-          <p>Full Pool: 1071.00 ft</p>
+          <p>Current Level: <span className="font-bold text-sky-600">{data ? convertLevel(data.waterLevel).toFixed(2) : '--'} {unitLabel}</span></p>
+          <p>Full Pool: {convertLevel(1071.00).toFixed(2)} {unitLabel}</p>
         </div>
       </div>
 
@@ -313,15 +340,16 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
             <thead>
               <tr className="bg-sky-50 text-[10px] font-bold uppercase tracking-wider text-gray-600">
                 <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">High (ft)</th>
-                <th className="px-4 py-3">Low (ft)</th>
-                <th className="px-4 py-3">Rain (in)</th>
+                <th className="px-4 py-3">End of Day ({unitLabel})</th>
+                <th className="px-4 py-3">High ({unitLabel})</th>
+                <th className="px-4 py-3">Low ({unitLabel})</th>
+                <th className="px-4 py-3">Rain ({rainUnit})</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {tableLoading ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center">
+                  <td colSpan={5} className="px-4 py-8 text-center">
                     <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-500" />
                     <p className="mt-2 text-xs text-gray-400">Loading recent readings...</p>
                   </td>
@@ -330,6 +358,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
                 recentReadings.map((reading, idx) => (
                   <tr key={idx} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-4 font-medium">{reading.date}</td>
+                    <td className="px-4 py-4 font-bold text-sky-700">{reading.lastLevel > 0 ? reading.lastLevel.toFixed(2) : '--'}</td>
                     <td className="px-4 py-4">{reading.high > 0 ? reading.high.toFixed(2) : '--'}</td>
                     <td className="px-4 py-4">{reading.low > 0 ? reading.low.toFixed(2) : '--'}</td>
                     <td className="px-4 py-4">{reading.rain > 0 ? reading.rain.toFixed(2) : '0.00'}</td>
@@ -337,7 +366,7 @@ const HistoryView = ({ data, onAction }: { data: LakeData | null, onAction: (msg
                 ))
               ) : (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
                     No recent data available
                   </td>
                 </tr>
@@ -496,9 +525,49 @@ const MapView = () => {
   );
 };
 
-const SettingsView = ({ onAction }: { onAction: (msg: string) => void }) => {
+const SettingsView = ({ onAction, unitSystem, setUnitSystem }: { onAction: (msg: string) => void, unitSystem: UnitSystem, setUnitSystem: (u: UnitSystem) => void }) => {
   return (
     <div className="space-y-8 pb-24">
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 px-1">
+          <User size={20} className="text-sky-600" />
+          <h2 className="text-lg font-semibold text-slate-800">Profile Information</h2>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-16 w-16 rounded-full bg-sky-100 flex items-center justify-center text-sky-600">
+              <User size={32} />
+            </div>
+            <div>
+              <p className="font-bold text-slate-800">Lake Lanier Explorer</p>
+              <p className="text-sm text-slate-500">explorer@lakelanier.app</p>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Display Name</label>
+              <div className="relative">
+                <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input type="text" defaultValue="Lake Lanier Explorer" className="w-full rounded-xl border-slate-200 pl-10 focus:border-sky-500 focus:ring-sky-500" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Email Address</label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input type="email" defaultValue="explorer@lakelanier.app" className="w-full rounded-xl border-slate-200 pl-10 focus:border-sky-500 focus:ring-sky-500" />
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={() => onAction('Profile updated successfully')}
+            className="mt-6 w-full rounded-xl bg-sky-600 py-3 font-semibold text-white shadow-sm transition-transform active:scale-95"
+          >
+            Update Profile
+          </button>
+        </div>
+      </section>
+
       <section className="space-y-4">
         <div className="flex items-center gap-2 px-1">
           <Bell size={20} className="text-sky-600" />
@@ -511,14 +580,14 @@ const SettingsView = ({ onAction }: { onAction: (msg: string) => void }) => {
               <label className="text-sm font-medium text-slate-700">Drop Below Threshold</label>
               <div className="flex items-center gap-2">
                 <input type="number" placeholder="1068" className="w-20 rounded-lg border-slate-300 text-right focus:border-sky-500 focus:ring-sky-500" />
-                <span className="text-sm text-slate-400">ft</span>
+                <span className="text-sm text-slate-400">{unitSystem === 'metric' ? 'm' : 'ft'}</span>
               </div>
             </div>
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-slate-700">Rise Above Threshold</label>
               <div className="flex items-center gap-2">
                 <input type="number" placeholder="1071" className="w-20 rounded-lg border-slate-300 text-right focus:border-sky-500 focus:ring-sky-500" />
-                <span className="text-sm text-slate-400">ft</span>
+                <span className="text-sm text-slate-400">{unitSystem === 'metric' ? 'm' : 'ft'}</span>
               </div>
             </div>
           </div>
@@ -559,16 +628,67 @@ const SettingsView = ({ onAction }: { onAction: (msg: string) => void }) => {
           <label className="mb-3 block text-sm font-medium text-slate-700">Measurement Units</label>
           <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
             <button 
-              onClick={() => onAction('Units set to Imperial')}
-              className="rounded-md bg-white py-2 px-4 text-sm font-medium text-sky-600 shadow-sm"
+              onClick={() => {
+                setUnitSystem('imperial');
+                onAction('Units set to Imperial');
+              }}
+              className={cn(
+                "rounded-md py-2 px-4 text-sm font-medium transition-all",
+                unitSystem === 'imperial' ? "bg-white text-sky-600 shadow-sm" : "text-slate-600 hover:text-sky-600"
+              )}
             >
               Imperial (ft)
             </button>
             <button 
-              onClick={() => onAction('Units set to Metric')}
-              className="rounded-md py-2 px-4 text-sm font-medium text-slate-600"
+              onClick={() => {
+                setUnitSystem('metric');
+                onAction('Units set to Metric');
+              }}
+              className={cn(
+                "rounded-md py-2 px-4 text-sm font-medium transition-all",
+                unitSystem === 'metric' ? "bg-white text-sky-600 shadow-sm" : "text-slate-600 hover:text-sky-600"
+              )}
             >
               Metric (m)
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 px-1">
+          <Shield size={20} className="text-sky-600" />
+          <h2 className="text-lg font-semibold text-slate-800">Privacy Settings</h2>
+        </div>
+        <div className="divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-white shadow-sm">
+          {[
+            { label: 'Location Sharing', sub: 'Allow app to use your GPS for map features', checked: true, icon: MapPin },
+            { label: 'Data Analytics', sub: 'Help us improve by sharing anonymous usage data', checked: true, icon: Info },
+            { label: 'Public Profile', sub: 'Make your profile visible to other users', checked: false, icon: User }
+          ].map((item) => (
+            <div key={item.label} className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-slate-50 p-2 text-slate-400">
+                  <item.icon size={18} />
+                </div>
+                <div>
+                  <p className="font-medium text-slate-800">{item.label}</p>
+                  <p className="text-xs text-slate-500">{item.sub}</p>
+                </div>
+              </div>
+              <label className="relative inline-flex cursor-pointer items-center">
+                <input type="checkbox" defaultChecked={item.checked} className="peer sr-only" />
+                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-sky-500 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none"></div>
+              </label>
+            </div>
+          ))}
+          <div className="p-4">
+            <button 
+              onClick={() => onAction('Privacy settings updated')}
+              className="flex items-center gap-2 text-sm font-semibold text-sky-600"
+            >
+              <Lock size={16} />
+              Manage Advanced Privacy
             </button>
           </div>
         </div>
@@ -619,6 +739,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [unitSystem, setUnitSystem] = useState<UnitSystem>('imperial');
 
   const showToast = (message: string) => {
     setToast(message);
@@ -631,7 +752,7 @@ export default function App() {
         setLoading(true);
         const [data, history] = await Promise.all([
           fetchLakeData(),
-          fetchHistoricalData(7)
+          fetchHistoricalData(1)
         ]);
         setLakeData(data);
         setChartData(history);
@@ -673,11 +794,11 @@ export default function App() {
     }
 
     switch (activeTab) {
-      case 'dashboard': return <Dashboard data={lakeData} chartData={chartData} />;
-      case 'history': return <HistoryView data={lakeData} onAction={showToast} />;
+      case 'dashboard': return <Dashboard data={lakeData} chartData={chartData} unitSystem={unitSystem} />;
+      case 'history': return <HistoryView data={lakeData} onAction={showToast} unitSystem={unitSystem} />;
       case 'map': return <MapView />;
-      case 'settings': return <SettingsView onAction={showToast} />;
-      default: return <Dashboard data={lakeData} chartData={chartData} />;
+      case 'settings': return <SettingsView onAction={showToast} unitSystem={unitSystem} setUnitSystem={setUnitSystem} />;
+      default: return <Dashboard data={lakeData} chartData={chartData} unitSystem={unitSystem} />;
     }
   };
 
