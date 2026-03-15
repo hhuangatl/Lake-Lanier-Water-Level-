@@ -1,0 +1,7 @@
+{
+  "name": "Lake Lanier Tracker",
+  "description": "Real-time water levels, historical data, and map explorer for Lake Lanier.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
